@@ -96,6 +96,7 @@ int main(int argc, char **argv)
   if (pipe(pipefd) == -1) 
   {
     printf("Pipe failed!\n");
+    free(array);
     return 1;
   }
 
@@ -103,6 +104,7 @@ int main(int argc, char **argv)
   if (file == NULL)
   {
     printf("fopen error!\n");
+    free(array);
     return 1;
   }
   
@@ -136,6 +138,7 @@ int main(int argc, char **argv)
     else 
     {
       printf("Fork failed!\n");
+      free(array);
       return 1;
     }
   }
@@ -150,6 +153,7 @@ int main(int argc, char **argv)
   if (file == NULL)
   {
     printf("fopen error!\n");
+    free(array);
     return 1;
   }
     
