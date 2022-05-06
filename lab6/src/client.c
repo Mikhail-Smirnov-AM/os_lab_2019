@@ -1,34 +1,16 @@
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 
-#include <errno.h>
-#include <getopt.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <sys/socket.h>
-#include <sys/types.h>
+#include "pthread.h"
+#include "utils.h"
+
+unsigned int servers_num = 0;
+uint64_t k = -1;
+uint64_t mod = -1;
 
 struct Server {
   char ip[255];
   int port;
+  int num;
 };
-
-uint64_t MultModulo(uint64_t a, uint64_t b, uint64_t mod) {
-  uint64_t result = 0;
-  a = a % mod;
-  while (b > 0) {
-    if (b % 2 == 1)
-      result = (result + a) % mod;
-    a = (a * 2) % mod;
-    b /= 2;
-  }
-
-  return result % mod;
-}
 
 bool ConvertStringToUI64(const char *str, uint64_t *val) {
   char *end = NULL;
@@ -45,9 +27,68 @@ bool ConvertStringToUI64(const char *str, uint64_t *val) {
   return true;
 }
 
+uint64_t send_receive(struct Server* to)
+{
+  struct hostent *hostname = gethostbyname(to->ip);
+    if (hostname == NULL) 
+    {
+      fprintf(stderr, "gethostbyname failed with %s\n", to->ip);
+      exit(1);
+    }
+
+    struct sockaddr_in server;
+    server.sin_family = AF_INET;
+    server.sin_port = htons(to->port);
+    server.sin_addr.s_addr = *((unsigned long *)hostname->h_addr);
+
+    int sck = socket(AF_INET, SOCK_STREAM, 0);
+    if (sck < 0) {
+      fprintf(stderr, "Socket creation failed!\n");
+      exit(1);
+    }
+
+    if (connect(sck, (struct sockaddr *)&server, sizeof(server)) < 0) {
+      fprintf(stderr, "Connection failed\n");
+      exit(1);
+    }
+
+    // TODO: for one server
+    // parallel between servers
+    uint64_t begin = to->num*k/servers_num;
+    uint64_t end = (to->num+1)*k/servers_num;
+
+    if (to->num == 0) begin = 1;
+    
+    char task[sizeof(uint64_t) * 3];
+    memcpy(task, &begin, sizeof(uint64_t));
+    memcpy(task + sizeof(uint64_t), &end, sizeof(uint64_t));
+    memcpy(task + 2 * sizeof(uint64_t), &mod, sizeof(uint64_t));
+
+    if (send(sck, task, sizeof(task), 0) < 0) {
+      fprintf(stderr, "Send failed\n");
+      exit(1);
+    }
+
+    char response[sizeof(uint64_t)];
+    if (recv(sck, response, sizeof(response), 0) < 0) {
+      fprintf(stderr, "Recieve failed\n");
+      exit(1);
+    }
+    uint64_t answer = 0;
+    memcpy(&answer, response, sizeof(uint64_t));
+
+    close(sck);
+  
+    return answer; 
+}
+
+void * ThreadSendReceive(void *args) 
+{
+  struct Server *Sargs = (struct Server *)args;
+  return (void *)(uint64_t *)send_receive(Sargs);
+}
+
 int main(int argc, char **argv) {
-  uint64_t k = -1;
-  uint64_t mod = -1;
   char servers[255] = {'\0'}; // TODO: explain why 255
 
   while (true) {
@@ -68,15 +109,13 @@ int main(int argc, char **argv) {
     case 0: {
       switch (option_index) {
       case 0:
-        ConvertStringToUI64(optarg, &k);
-        // TODO: your code here
+        if(!ConvertStringToUI64(optarg, &k)) k = -1;
         break;
       case 1:
-        ConvertStringToUI64(optarg, &mod);
-        // TODO: your code here
+        if(!ConvertStringToUI64(optarg, &mod)) mod = -1;
         break;
       case 2:
-        // TODO: your code here
+        // TODO: your code her
         memcpy(servers, optarg, strlen(optarg));
         break;
       default:
@@ -98,67 +137,53 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // TODO: for one server here, rewrite with servers from file
-  unsigned int servers_num = 1;
-  struct Server *to = malloc(sizeof(struct Server) * servers_num);
-  // TODO: delete this and parallel work between servers
-  to[0].port = 20001;
-  memcpy(to[0].ip, "127.0.0.1", sizeof("127.0.0.1"));
-
-  // TODO: work continiously, rewrite to make parallel
-  for (int i = 0; i < servers_num; i++) {
-    struct hostent *hostname = gethostbyname(to[i].ip);
-    if (hostname == NULL) {
-      fprintf(stderr, "gethostbyname failed with %s\n", to[i].ip);
-      exit(1);
-    }
-
-    struct sockaddr_in server;
-    server.sin_family = AF_INET;
-    server.sin_port = htons(to[i].port);
-    server.sin_addr.s_addr = *((unsigned long *)hostname->h_addr);
-
-    int sck = socket(AF_INET, SOCK_STREAM, 0);
-    if (sck < 0) {
-      fprintf(stderr, "Socket creation failed!\n");
-      exit(1);
-    }
-
-    if (connect(sck, (struct sockaddr *)&server, sizeof(server)) < 0) {
-      fprintf(stderr, "Connection failed\n");
-      exit(1);
-    }
-
-    // TODO: for one server
-    // parallel between servers
-    uint64_t begin = 1;
-    uint64_t end = k;
-
-    char task[sizeof(uint64_t) * 3];
-    memcpy(task, &begin, sizeof(uint64_t));
-    memcpy(task + sizeof(uint64_t), &end, sizeof(uint64_t));
-    memcpy(task + 2 * sizeof(uint64_t), &mod, sizeof(uint64_t));
-
-    if (send(sck, task, sizeof(task), 0) < 0) {
-      fprintf(stderr, "Send failed\n");
-      exit(1);
-    }
-
-    char response[sizeof(uint64_t)];
-    if (recv(sck, response, sizeof(response), 0) < 0) {
-      fprintf(stderr, "Recieve failed\n");
-      exit(1);
-    }
-
-    // TODO: from one server
-    // unite results
-    uint64_t answer = 0;
-    memcpy(&answer, response, sizeof(uint64_t));
-    printf("answer: %llu\n", answer);
-
-    close(sck);
+  
+  FILE* file = fopen(servers,"r");
+  if (file == NULL)
+  {
+    printf("fopen error!\n");
+    return 1;
   }
-  free(to);
+  while (! feof(file))
+  {
+      if (fgetc(file) == '\n')
+          servers_num++;
+  }
+  servers_num++;
+  fclose(file);
 
+  file = fopen(servers,"r");
+  // TODO: for one server here, rewrite with servers from file
+  struct Server *to = malloc(sizeof(struct Server) * servers_num);
+  for(uint64_t i = 0; i < servers_num; i++)
+    {
+      fscanf(file,"%d:%s",&to[i].port, &to[i].ip);
+      to[i].num = i;
+    }
+  fclose(file);
+  
+  pthread_t threads[servers_num];
+  
+  for (uint32_t i = 0; i < servers_num; i++) 
+  { 
+    if (pthread_create(&threads[i], NULL, ThreadSendReceive,(void *)&to[i])) 
+    {
+          printf("Error: pthread_create failed!\n");
+          return 1;
+    }
+  }
+
+  uint64_t total = 1;
+  for (uint32_t i = 0; i < servers_num; i++) 
+  {
+    uint64_t result = 0;
+    pthread_join(threads[i], (void **)&result);
+    total = MultModulo(total, result, mod);
+  }
+  printf("answer: %lu\n", total);
+
+  free(to);
+  
   return 0;
 }
+
